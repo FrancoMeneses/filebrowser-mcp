@@ -75,36 +75,28 @@ mcp_servers:
 
 ### File Operations
 
-| Tool | Description | Permissions Needed |
-|------|-------------|-------------------|
-| `list_files` | List files and folders in a directory | `api` |
-| `get_file_info` | Get file/folder metadata | `api` |
-| `read_file` | Read file contents | `api` |
-| `upload_file` | Create or update a file | `modify` or `create` |
-| `create_folder` | Create a new directory | `create` |
-| `delete_item` | Delete a file or folder | `delete` |
-| `download_file` | Download a file | `download` |
+| Tool | Description |
+|------|-------------|
+| `list_files` | List files and folders in a directory |
+| `get_file_info` | Get file/folder metadata |
+| `read_file` | Read file contents |
+| `upload_file` | Create or update a file |
+| `create_folder` | Create a new directory |
+| `delete_item` | Delete a file or folder |
+| `download_file` | Download a file |
 
-Permissions are checked against the user's scope — users can only operate on files within their allowed folders.
+Permissions are managed by FileBrowser — if a user lacks permission, the API returns an error.
 
-### User Management (Requires `admin` permission)
+### User Management
 
-Users are managed with **8 granular permission flags**:
+| Tool | Description |
+|------|-------------|
+| `list_users` | List all users |
+| `create_user` | Create user with scope and permissions |
+| `update_user` | Update user permissions or scope |
+| `delete_user` | Delete a user |
 
-| Permission | Description |
-|------------|-------------|
-| `admin` | Access to admin panel and user management |
-| `api` | Access to REST API |
-| `modify` | Edit existing files |
-| `create` | Create new files and folders |
-| `delete` | Delete files and folders |
-| `download` | Download files |
-| `share` | Create public shares |
-| `realtime` | WebSocket connections |
-
-Each user also has a **scope** that defines which folders they can access (e.g., `/` for all, `/laserbox` for restricted).
-
-Example: A user with `admin=false, modify=true, create=true, delete=false` can upload and edit files but cannot delete them or manage other users.
+User and permission management is done through FileBrowser's API. The MCP passes through the API responses directly.
 
 ### System
 
