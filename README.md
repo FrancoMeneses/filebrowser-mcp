@@ -39,12 +39,12 @@ Add to `~/.hermes/config.yaml`:
 mcp_servers:
   filebrowser:
     command: "python3"
-    args: ["/path/to/filebrowser-mcp/src/filebrowser/server.py"]
+    ```yaml
     env:
-      FB_URL: "https://100.120.238.37:8080"
-      FB_USER: "subfire"
-      FB_PASSWORD: "subfire123"
-    timeout: 30
+      FB_URL: "https://your-host:8080"
+      FB_USER: "your-username"
+      FB_PASSWORD: "your-password"
+    ```
 ```
 
 ### Multi-User Setup
