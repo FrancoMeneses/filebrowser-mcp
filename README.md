@@ -41,7 +41,7 @@ mcp_servers:
     command: "python3"
     ```yaml
     env:
-      FB_URL: "https://your-host:8080"
+      FB_URL: "https://your-filebrowser-host"
       FB_USER: "your-username"
       FB_PASSWORD: "your-password"
     ```
@@ -57,7 +57,7 @@ mcp_servers:
     command: "python3"
     args: ["/path/to/server.py"]
     env:
-      FB_URL: "https://your-host:8080"
+      FB_URL: "https://your-filebrowser-host"
       FB_USER: "admin"
       FB_PASSWORD: "***"
     timeout: 30
@@ -65,7 +65,7 @@ mcp_servers:
     command: "python3"
     args: ["/path/to/server.py"]
     env:
-      FB_URL: "https://your-host:8080"
+      FB_URL: "https://your-filebrowser-host"
       FB_USER: "restricted-user"
       FB_PASSWORD: "***"
     timeout: 30
