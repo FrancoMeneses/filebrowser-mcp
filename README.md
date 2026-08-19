@@ -75,17 +75,17 @@ mcp_servers:
 
 ### File Operations
 
-| Tool | Description | Admin Required |
-|------|-------------|----------------|
-| `list_files` | List files and folders in a directory | No |
-| `get_file_info` | Get file/folder metadata | No |
-| `read_file` | Read file contents | No |
-| `upload_file` | Create or update a file | Yes* |
-| `create_folder` | Create a new directory | Yes* |
-| `delete_item` | Delete a file or folder | Yes* |
-| `download_file` | Download a file to local path | No |
+| Tool | Description | Permissions Needed |
+|------|-------------|-------------------|
+| `list_files` | List files and folders in a directory | `api` |
+| `get_file_info` | Get file/folder metadata | `api` |
+| `read_file` | Read file contents | `api` |
+| `upload_file` | Create or update a file | `modify` or `create` |
+| `create_folder` | Create a new directory | `create` |
+| `delete_item` | Delete a file or folder | `delete` |
+| `download_file` | Download a file | `download` |
 
-*Depends on user permissions
+Permissions are checked against the user's scope — users can only operate on files within their allowed folders.
 
 ### User Management (Requires `admin` permission)
 
