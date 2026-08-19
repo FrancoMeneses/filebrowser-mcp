@@ -5,7 +5,7 @@ Provides tools for managing files and users on FileBrowser Quantum.
 Authentication is handled automatically via environment variables.
 
 Environment Variables:
-    FB_URL: FileBrowser server URL (e.g., https://localhost:8080)
+    FB_URL: FileBrowser server URL (e.g., https://your-filebrowser-host)
     FB_USER: Username for authentication
     FB_PASSWORD: Password for authentication
 """
@@ -44,13 +44,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Read config from environment
-FB_URL = os.environ.get("FB_URL", "https://localhost:8080")
+FB_URL = os.environ.get("FB_URL", "https://your-filebrowser-host")
 FB_USER = os.environ.get("FB_USER", "")
 FB_PASSWORD = os.environ.get("FB_PASSWORD", "")
 
 if not FB_USER or not FB_PASSWORD:
-    logger.warning("FB_USER and FB_PASSWORD not set — authentication will fail")
+    logger.warning("FB_USER and FB_PASSWORD not set")
 
 # ============================================================
 # MCP Server
@@ -65,23 +64,26 @@ mcp = FastMCP(
     - Creating folders
     - Managing users (admin only)
 
-    Authentication is automatic via environment variables.
-    Permissions depend on the configured user account.
+    Permissions (8 individual flags):
+    - admin: Access to admin panel and user management
+    - api: Access to REST API
+    - modify: Edit existing files
+    - create: Create new files and folders
+    - delete: Delete files and folders
+    - download: Download files
+    - share: Create public shares
+    - realtime: WebSocket connections
+
+    Scopes define WHAT a user can access (e.g., "/" or "/laserbox").
     """
 )
 
 
 def _get_client() -> FileBrowserClient:
-    """Get an authenticated FileBrowser client."""
-    return FileBrowserClient(
-        url=FB_URL,
-        username=FB_USER,
-        password=FB_PASSWORD,
-    )
+    return FileBrowserClient(url=FB_URL, username=FB_USER, password=FB_PASSWORD)
 
 
 def _handle_error(e: Exception) -> dict:
-    """Convert FileBrowser exceptions to user-friendly dicts."""
     if isinstance(e, AuthenticationError):
         return {"error": "Authentication failed", "details": str(e)}
     elif isinstance(e, RateLimitError):
@@ -92,8 +94,7 @@ def _handle_error(e: Exception) -> dict:
         return {"error": "Permission denied", "details": str(e)}
     elif isinstance(e, FileBrowserError):
         return {"error": "FileBrowser error", "details": str(e)}
-    else:
-        return {"error": "Unexpected error", "details": str(e)}
+    return {"error": "Unexpected error", "details": str(e)}
 
 
 # ============================================================
@@ -168,15 +169,13 @@ def upload_file(path: str, content: str, content_type: str = "text/plain") -> di
     """
     Create or update a file.
 
-    For new files, POST is used. For updates, PUT is used automatically.
-
     Args:
         path: File path (e.g., "/documents/note.txt")
         content: File content
         content_type: MIME type (default: text/plain)
 
     Returns:
-        Upload confirmation with file info
+        Upload confirmation
     """
     logger.info("Uploading file: %s", path)
     client = _get_client()
@@ -192,9 +191,6 @@ def upload_file(path: str, content: str, content_type: str = "text/plain") -> di
 def create_folder(path: str) -> dict:
     """
     Create a new directory.
-
-    IMPORTANT: The 'isDir' parameter is handled automatically.
-    Do NOT include it in the path or content.
 
     Args:
         path: Directory path (e.g., "/documents/new-folder")
@@ -215,9 +211,7 @@ def create_folder(path: str) -> dict:
 @mcp.tool()
 def delete_item(path: str) -> dict:
     """
-    Delete a file or folder.
-
-    WARNING: This operation is irreversible.
+    Delete a file or folder. WARNING: Irreversible.
 
     Args:
         path: Path to delete
@@ -240,24 +234,21 @@ def download_file(path: str) -> str:
     """
     Download a file and return its content.
 
-    For large files, consider using the FileBrowser web interface.
-
     Args:
         path: File path to download
 
     Returns:
-        File content as string (for text files) or base64 (for binary)
+        File content (text or base64 for binary)
     """
-    logger.info("Downloading file: %s", path)
+    logger.info("Downloading: %s", path)
     client = _get_client()
     try:
         content = client.download_file(path)
-        # Try to decode as UTF-8 for text files
         try:
             return content.decode("utf-8")
         except UnicodeDecodeError:
             import base64
-            return f"[Binary file — base64]: {base64.b64encode(content).decode()}"
+            return f"[Binary — base64]: {base64.b64encode(content).decode()}"
     except Exception as e:
         return str(_handle_error(e))
     finally:
@@ -271,12 +262,10 @@ def download_file(path: str) -> str:
 @mcp.tool()
 def list_users() -> list[dict]:
     """
-    List all users.
-
-    Requires admin privileges.
+    List all users with their permissions and scopes.
 
     Returns:
-        List of user objects with permissions and scopes
+        List of users: {id, username, permissions{}, scopes[]}
     """
     logger.info("Listing users")
     client = _get_client()
@@ -289,48 +278,54 @@ def list_users() -> list[dict]:
 
 
 @mcp.tool()
-def get_current_user() -> dict:
-    """
-    Get current user information.
-
-    Returns:
-        Current user object with permissions
-    """
-    logger.info("Getting current user")
-    client = _get_client()
-    try:
-        return client.get_current_user()
-    except Exception as e:
-        return _handle_error(e)
-    finally:
-        client.close()
-
-
-@mcp.tool()
 def create_user(
     username: str,
     password: str,
     scope: str = "/",
     admin: bool = False,
+    api: bool = True,
+    modify: bool = True,
+    create: bool = True,
+    delete: bool = True,
+    download: bool = True,
+    share: bool = False,
+    realtime: bool = False,
 ) -> dict:
     """
-    Create a new user.
+    Create a new user with granular permissions.
 
     Requires admin privileges.
 
     Args:
         username: New username (min 1 char)
         password: User password (min 5 chars)
-        scope: Filesystem scope (default: root "/")
-        admin: Grant admin access (default: False)
+        scope: Filesystem scope — what folders user can access (default: "/" = all)
+        admin: Access to admin panel and user management
+        api: Access to REST API
+        modify: Edit existing files
+        create: Create new files and folders
+        delete: Delete files and folders
+        download: Download files
+        share: Create public shares
+        realtime: WebSocket connections
 
     Returns:
         Created user object
     """
-    logger.info("Creating user: %s (scope: %s, admin: %s)", username, scope, admin)
+    logger.info("Creating user: %s (scope: %s)", username, scope)
     client = _get_client()
     try:
-        return client.create_user(username, password, scope, admin)
+        permissions = {
+            "admin": admin,
+            "api": api,
+            "modify": modify,
+            "create": create,
+            "delete": delete,
+            "download": download,
+            "share": share,
+            "realtime": realtime,
+        }
+        return client.create_user(username, password, scope, permissions)
     except Exception as e:
         return _handle_error(e)
     finally:
@@ -343,25 +338,47 @@ def update_user(
     username: Optional[str] = None,
     scope: Optional[str] = None,
     admin: Optional[bool] = None,
+    api: Optional[bool] = None,
+    modify: Optional[bool] = None,
+    create: Optional[bool] = None,
+    delete: Optional[bool] = None,
+    download: Optional[bool] = None,
+    share: Optional[bool] = None,
+    realtime: Optional[bool] = None,
 ) -> dict:
     """
-    Update an existing user.
+    Update an existing user. Only provided fields are updated.
 
-    Requires admin privileges. Only provided fields are updated.
+    Requires admin privileges.
 
     Args:
-        user_id: User ID to update
+        user_id: User ID to update (get from list_users)
         username: New username (optional)
         scope: New filesystem scope (optional)
-        admin: New admin status (optional)
+        admin, api, modify, create, delete, download, share, realtime:
+            Permission flags to update (optional, only changed ones)
 
     Returns:
-        Updated user object
+        Updated user confirmation
     """
     logger.info("Updating user %s", user_id)
     client = _get_client()
     try:
-        return client.update_user(user_id, username, scope, admin)
+        permissions = {}
+        for flag, value in [
+            ("admin", admin), ("api", api), ("modify", modify),
+            ("create", create), ("delete", delete), ("download", download),
+            ("share", share), ("realtime", realtime),
+        ]:
+            if value is not None:
+                permissions[flag] = value
+
+        return client.update_user(
+            user_id,
+            username=username,
+            scope=scope,
+            permissions=permissions if permissions else None,
+        )
     except Exception as e:
         return _handle_error(e)
     finally:
@@ -371,12 +388,12 @@ def update_user(
 @mcp.tool()
 def delete_user(user_id: int) -> dict:
     """
-    Delete a user.
+    Delete a user. WARNING: Irreversible.
 
-    Requires admin privileges. This operation is irreversible.
+    Requires admin privileges.
 
     Args:
-        user_id: User ID to delete
+        user_id: User ID to delete (get from list_users)
 
     Returns:
         Deletion confirmation

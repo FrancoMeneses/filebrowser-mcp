@@ -3,6 +3,14 @@ FileBrowser Quantum API Client.
 
 Handles authentication, token management, and all API operations.
 Tested with FileBrowser Quantum v1.5.x.
+
+API Structure (verified):
+- Login: POST /api/auth/login?username=X, Header: X-Password
+- Users: GET/POST/PUT/DELETE /api/users
+- Files: GET/POST/PUT/DELETE /api/resources
+- User fields: id, username, permissions{}, scopes[{name, scope}]
+- Permissions: admin, api, modify, create, delete, download, share, realtime
+- Scopes: [{name: "Principal", scope: "/path"}]
 """
 
 import os
@@ -18,7 +26,6 @@ logger = logging.getLogger(__name__)
 
 class FileBrowserError(Exception):
     """Base exception for FileBrowser API errors."""
-
     def __init__(self, message: str, status_code: int = None):
         super().__init__(message)
         self.status_code = status_code
@@ -53,7 +60,7 @@ class FileBrowserClient:
 
     Usage:
         client = FileBrowserClient(
-            url="https://localhost:8080",
+            url="https://your-host",
             username="admin",
             password="***"
         )
@@ -89,9 +96,7 @@ class FileBrowserClient:
                 )
 
             if response.status_code == 401:
-                raise AuthenticationError(
-                    "Invalid username or password"
-                )
+                raise AuthenticationError("Invalid username or password")
 
             if response.status_code != 200:
                 raise FileBrowserError(
@@ -122,64 +127,55 @@ class FileBrowserClient:
         json_data: dict = None,
         content: bytes = None,
         content_type: str = None,
-        require_admin: bool = False,
+        admin_password: bool = False,
     ) -> httpx.Response:
         """
         Make an authenticated API request.
 
-        Automatically handles token refresh on 401 responses.
+        Args:
+            admin_password: If True, include X-Password header (for user management)
         """
         token = self._get_token()
 
         headers = {"Authorization": f"Bearer {token}"}
         if content_type:
             headers["Content-Type"] = content_type
+        if admin_password:
+            headers["X-Password"] = self.password
 
         url = f"{self.url}{path}"
 
         try:
             response = self._http.request(
-                method,
-                url,
-                params=params,
-                json=json_data,
-                content=content,
-                headers=headers,
+                method, url, params=params, json=json_data,
+                content=content, headers=headers,
             )
 
-            # Token expired or invalid — try re-login once
+            # Token expired — try re-login once
             if response.status_code == 401:
                 logger.info("Token expired, re-authenticating...")
                 self._token = None
                 token = self._login()
                 headers["Authorization"] = f"Bearer {token}"
                 response = self._http.request(
-                    method,
-                    url,
-                    params=params,
-                    json=json_data,
-                    content=content,
-                    headers=headers,
+                    method, url, params=params, json=json_data,
+                    content=content, headers=headers,
                 )
 
             if response.status_code == 404:
                 raise NotFoundError(f"Resource not found: {path}")
-
             if response.status_code == 403:
-                raise PermissionError(
-                    f"Permission denied. Admin access required for this operation."
-                    if require_admin
-                    else f"Permission denied: {path}"
-                )
-
+                raise PermissionError(f"Permission denied: {path}")
             if response.status_code == 429:
-                raise RateLimitError(
-                    "Rate limit hit. Account may be temporarily locked."
-                )
-
+                raise RateLimitError("Rate limit hit. Account temporarily locked.")
             if response.status_code >= 400:
+                try:
+                    err = response.json()
+                    msg = err.get("message", response.text[:200])
+                except Exception:
+                    msg = response.text[:200]
                 raise FileBrowserError(
-                    f"API error: {response.status_code} — {response.text[:200]}",
+                    f"API error {response.status_code}: {msg}",
                     status_code=response.status_code,
                 )
 
@@ -193,23 +189,12 @@ class FileBrowserClient:
     # ============================================================
 
     def list_files(self, path: str = "/") -> list[dict]:
-        """
-        List files and folders in a directory.
-
-        Args:
-            path: Directory path (default: root)
-
-        Returns:
-            List of file/folder metadata
-        """
+        """List files and folders in a directory."""
         response = self._request(
-            "GET",
-            "/api/resources",
+            "GET", "/api/resources",
             params={"path": path, "source": "Principal"}
         )
         data = response.json()
-
-        # Response is a single item (the directory) with 'items' inside
         if isinstance(data, dict) and "items" in data:
             return data["items"]
         elif isinstance(data, list):
@@ -217,73 +202,28 @@ class FileBrowserClient:
         return []
 
     def get_file_info(self, path: str) -> dict:
-        """
-        Get metadata for a file or folder.
-
-        Args:
-            path: File or folder path
-
-        Returns:
-            File metadata (name, size, modTime, type, etc.)
-        """
+        """Get metadata for a file or folder."""
         response = self._request(
-            "GET",
-            "/api/resources",
+            "GET", "/api/resources",
             params={"path": path, "source": "Principal"}
         )
         return response.json()
 
     def read_file(self, path: str) -> str:
-        """
-        Read file contents.
-
-        Args:
-            path: File path
-
-        Returns:
-            File content as string
-        """
-        response = self._request(
-            "GET",
-            "/api/resources",
-            params={"path": path, "source": "Principal"}
-        )
-
-        data = response.json()
-        # If it's a directory, raise error
-        if isinstance(data, dict) and data.get("isDir"):
+        """Read file contents."""
+        info = self.get_file_info(path)
+        if isinstance(info, dict) and info.get("isDir"):
             raise FileBrowserError(f"Cannot read directory: {path}")
+        return info.get("content", "")
 
-        return data.get("content", response.text)
-
-    def upload_file(
-        self,
-        path: str,
-        content: str,
-        content_type: str = "text/plain"
-    ) -> dict:
-        """
-        Create or update a file.
-
-        Uses POST for new files, PUT for updates.
-        FileBrowser Quantum accepts both for creation.
-
-        Args:
-            path: File path (e.g., "/documents/note.txt")
-            content: File content
-            content_type: MIME type (default: text/plain)
-
-        Returns:
-            Upload response with file info
-        """
+    def upload_file(self, path: str, content: str, content_type: str = "text/plain") -> dict:
+        """Create or update a file."""
         response = self._request(
-            "POST",
-            "/api/resources",
+            "POST", "/api/resources",
             params={"path": path, "source": "Principal"},
             content=content.encode("utf-8"),
             content_type=content_type,
         )
-
         try:
             return response.json()
         except Exception:
@@ -293,56 +233,26 @@ class FileBrowserClient:
         """
         Create a new directory.
 
-        IMPORTANT: isDir must be in query string, NOT in JSON body.
-        Putting {"isDir": true} in body creates a file with that content.
-
-        Args:
-            path: Directory path (e.g., "/documents/new-folder")
-
-        Returns:
-            Creation response
-        """
-        response = self._request(
-            "POST",
-            "/api/resources",
-            params={"path": path, "source": "Principal", "isDir": "true"},
-        )
-
-        try:
-            return response.json()
-        except Exception:
-            return {"message": f"Folder '{path}' created successfully"}
-
-    def delete_item(self, path: str) -> dict:
-        """
-        Delete a file or folder.
-
-        Args:
-            path: Path to delete
-
-        Returns:
-            Deletion confirmation
+        IMPORTANT: isDir goes in query string, NOT in JSON body.
         """
         self._request(
-            "DELETE",
-            "/api/resources",
+            "POST", "/api/resources",
+            params={"path": path, "source": "Principal", "isDir": "true"},
+        )
+        return {"message": f"Folder '{path}' created"}
+
+    def delete_item(self, path: str) -> dict:
+        """Delete a file or folder."""
+        self._request(
+            "DELETE", "/api/resources",
             params={"path": path, "source": "Principal"}
         )
         return {"message": f"Deleted: {path}"}
 
     def download_file(self, path: str) -> bytes:
-        """
-        Download a file.
-
-        Args:
-            path: File path to download
-
-        Returns:
-            File content as bytes
-        """
+        """Download a file as bytes."""
         response = self._request(
-            "GET",
-            "/api/resources/download",
+            "GET", "/api/resources/download",
             params={"path": path, "source": "Principal"}
         )
         return response.content
@@ -355,65 +265,41 @@ class FileBrowserClient:
         """
         List all users.
 
-        Requires admin privileges.
-
-        Returns:
-            List of user objects
+        Returns list of users with: id, username, permissions{}, scopes[]
         """
-        response = self._request(
-            "GET",
-            "/api/users",
-            require_admin=True
-        )
+        response = self._request("GET", "/api/users", admin_password=False)
         return response.json()
 
-    def get_current_user(self) -> dict:
-        """
-        Get current user information.
-
-        Returns:
-            Current user object
-        """
-        response = self._request("GET", "/api/users/me")
-        return response.json()
 
     def create_user(
         self,
         username: str,
         password: str,
         scope: str = "/",
-        admin: bool = False,
         permissions: dict = None,
     ) -> dict:
         """
         Create a new user.
 
-        Requires admin privileges.
-
         Args:
             username: New username
-            password: User password
+            password: User password (min 5 chars)
             scope: Filesystem scope (default: root "/")
-            admin: Grant admin access (default: False)
-            permissions: Custom permissions dict (optional)
-
-        Returns:
-            Created user object
+            permissions: Dict with permission flags. Default:
+                {admin: false, api: true, modify: true, create: true,
+                 delete: true, download: true, share: false, realtime: false}
         """
         if permissions is None:
             permissions = {
-                "admin": admin,
+                "admin": False,
                 "api": True,
-                "share": False,
-                "realtime": False,
                 "modify": True,
                 "create": True,
                 "delete": True,
                 "download": True,
+                "share": False,
+                "realtime": False,
             }
-        else:
-            permissions["admin"] = admin
-            permissions["api"] = True
 
         user_data = {
             "which": [],
@@ -427,60 +313,28 @@ class FileBrowserClient:
             }
         }
 
-        # FileBrowser needs admin password in X-Password header for user creation
         response = self._request(
-            "POST",
-            "/api/users",
+            "POST", "/api/users",
             json_data=user_data,
-            require_admin=True,
+            admin_password=True,
         )
 
-        # Add X-Password header for user creation
-        # Re-do with admin password
-        token = self._get_token()
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "X-Password": self.password,
-        }
-
-        response = self._http.post(
-            f"{self.url}/api/users",
-            json=user_data,
-            headers=headers,
-        )
-
-        if response.status_code in (200, 201):
-            try:
-                return response.json()
-            except Exception:
-                return {"message": f"User '{username}' created successfully"}
-        else:
-            raise FileBrowserError(
-                f"Failed to create user: {response.status_code} — {response.text[:200]}"
-            )
+        try:
+            return response.json()
+        except Exception:
+            return {"message": f"User '{username}' created successfully"}
 
     def update_user(
         self,
         user_id: int,
         username: str = None,
         scope: str = None,
-        admin: bool = None,
         permissions: dict = None,
     ) -> dict:
         """
         Update an existing user.
 
-        Requires admin privileges.
-
-        Args:
-            user_id: User ID to update
-            username: New username (optional)
-            scope: New scope (optional)
-            admin: New admin status (optional)
-            permissions: New permissions dict (optional)
-
-        Returns:
-            Updated user object
+        Only provided fields are updated.
         """
         update_data = {"which": ["all"], "data": {}}
 
@@ -488,83 +342,39 @@ class FileBrowserClient:
             update_data["data"]["username"] = username
         if scope is not None:
             update_data["data"]["scopes"] = [{"name": "Principal", "scope": scope}]
-        if admin is not None:
-            if permissions is None:
-                permissions = {}
-            permissions["admin"] = admin
-            permissions["api"] = True
         if permissions is not None:
             update_data["data"]["permissions"] = permissions
 
-        token = self._get_token()
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "X-Password": self.password,
-        }
-
-        response = self._http.put(
-            f"{self.url}/api/users?id={user_id}",
-            json=update_data,
-            headers=headers,
+        response = self._request(
+            "PUT", f"/api/users?id={user_id}",
+            json_data=update_data,
+            admin_password=True,
         )
 
-        if response.status_code == 200:
-            try:
-                return response.json()
-            except Exception:
-                return {"message": f"User {user_id} updated successfully"}
-        else:
-            raise FileBrowserError(
-                f"Failed to update user: {response.status_code} — {response.text[:200]}"
-            )
+        try:
+            return response.json()
+        except Exception:
+            return {"message": f"User {user_id} updated"}
 
     def delete_user(self, user_id: int) -> dict:
-        """
-        Delete a user.
-
-        Requires admin privileges.
-
-        Args:
-            user_id: User ID to delete
-
-        Returns:
-            Deletion confirmation
-        """
-        token = self._get_token()
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "X-Password": self.password,
-        }
-
-        response = self._http.delete(
-            f"{self.url}/api/users?id={user_id}",
-            headers=headers,
+        """Delete a user by ID."""
+        self._request(
+            "DELETE", f"/api/users?id={user_id}",
+            admin_password=True,
         )
-
-        if response.status_code in (200, 204):
-            return {"message": f"User {user_id} deleted successfully"}
-        else:
-            raise FileBrowserError(
-                f"Failed to delete user: {response.status_code}"
-            )
+        return {"message": f"User {user_id} deleted"}
 
     # ============================================================
     # System
     # ============================================================
 
     def health_check(self) -> dict:
-        """
-        Check FileBrowser server status.
-
-        Returns:
-            Health status
-        """
+        """Check FileBrowser server status."""
         try:
             response = self._http.get(f"{self.url}/health")
             if response.status_code == 200:
                 return {"status": "healthy", "url": self.url}
-            else:
-                return {"status": "unhealthy", "code": response.status_code}
+            return {"status": "unhealthy", "code": response.status_code}
         except httpx.RequestError as e:
             return {"status": "unreachable", "error": str(e)}
 

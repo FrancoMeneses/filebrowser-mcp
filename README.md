@@ -78,12 +78,12 @@ mcp_servers:
 | Tool | Description | Admin Required |
 |------|-------------|----------------|
 | `list_files` | List files and folders in a directory | No |
+| `get_file_info` | Get file/folder metadata | No |
 | `read_file` | Read file contents | No |
 | `upload_file` | Create or update a file | Yes* |
 | `create_folder` | Create a new directory | Yes* |
 | `delete_item` | Delete a file or folder | Yes* |
 | `download_file` | Download a file to local path | No |
-| `get_file_info` | Get file/folder metadata | No |
 
 *Depends on user permissions
 
@@ -91,11 +91,10 @@ mcp_servers:
 
 | Tool | Description |
 |------|-------------|
-| `list_users` | List all users |
-| `create_user` | Create a new user with scope and permissions |
+| `list_users` | List all users with permissions and scopes |
+| `create_user` | Create user with 8 granular permission flags |
 | `update_user` | Update user permissions or scope |
 | `delete_user` | Delete a user |
-| `get_current_user` | Get current user info |
 
 ### System
 
