@@ -87,14 +87,24 @@ mcp_servers:
 
 *Depends on user permissions
 
-### User Management (Admin Only)
+### User Management (Requires `admin` permission)
 
-| Tool | Description |
-|------|-------------|
-| `list_users` | List all users with permissions and scopes |
-| `create_user` | Create user with 8 granular permission flags |
-| `update_user` | Update user permissions or scope |
-| `delete_user` | Delete a user |
+Users are managed with **8 granular permission flags**:
+
+| Permission | Description |
+|------------|-------------|
+| `admin` | Access to admin panel and user management |
+| `api` | Access to REST API |
+| `modify` | Edit existing files |
+| `create` | Create new files and folders |
+| `delete` | Delete files and folders |
+| `download` | Download files |
+| `share` | Create public shares |
+| `realtime` | WebSocket connections |
+
+Each user also has a **scope** that defines which folders they can access (e.g., `/` for all, `/laserbox` for restricted).
+
+Example: A user with `admin=false, modify=true, create=true, delete=false` can upload and edit files but cannot delete them or manage other users.
 
 ### System
 
